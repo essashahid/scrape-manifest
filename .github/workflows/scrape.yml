@@ -1,0 +1,66 @@
+name: Scrape Manifest Vegas 2026 Attendees
+
+on:
+  workflow_dispatch:  # Manual trigger from GitHub UI
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360  # 6 hour max
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install chromium --with-deps
+
+      - name: Create data directory
+        run: mkdir -p data
+
+      - name: Run scraper
+        env:
+          GRIP_EMAIL: ${{ secrets.GRIP_EMAIL }}
+          GRIP_PASSWORD: ${{ secrets.GRIP_PASSWORD }}
+        run: npx ts-node src/index.ts
+
+      - name: Upload CSV output
+        uses: actions/upload-artifact@v4
+        if: always()  # Upload even if scraper crashes (to preserve partial results)
+        with:
+          name: attendees-csv
+          path: data/attendees.csv
+          retention-days: 30
+
+      - name: Upload progress checkpoint
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: scraper-progress
+          path: data/progress.json
+          retention-days: 30
+
+      - name: Print summary
+        if: always()
+        run: |
+          if [ -f data/attendees.csv ]; then
+            LINES=$(wc -l < data/attendees.csv)
+            echo "### Scraping Results" >> $GITHUB_STEP_SUMMARY
+            echo "- CSV rows (including header): $LINES" >> $GITHUB_STEP_SUMMARY
+            echo "- Attendees scraped: $((LINES - 1))" >> $GITHUB_STEP_SUMMARY
+            echo "- File: \`data/attendees.csv\`" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "No CSV file found." >> $GITHUB_STEP_SUMMARY
+          fi
+          if [ -f data/progress.json ]; then
+            echo "- Progress file exists (can resume)" >> $GITHUB_STEP_SUMMARY
+          fi
