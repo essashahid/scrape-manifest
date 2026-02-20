@@ -14,15 +14,18 @@ export async function scrapeAttendeeDetail(
       ? attendee.profileUrl
       : `https://matchmaking.grip.events${attendee.profileUrl}`;
 
-    await page.goto(fullUrl, { waitUntil: 'domcontentloaded' });
-    await sleep(500);
+    await page.goto(fullUrl, { waitUntil: 'networkidle' });
 
     // Check if redirected to login
     if (page.url().includes('event-login')) {
       await ensureLoggedIn(page, context);
-      await page.goto(fullUrl, { waitUntil: 'domcontentloaded' });
-      await sleep(500);
+      await page.goto(fullUrl, { waitUntil: 'networkidle' });
     }
+
+    // Wait for profile content to fully render
+    await page.waitForSelector('p[data-test^="thingName"]', { timeout: 15000 });
+    // Extra wait for metadata sections (role, tags, etc.) to load
+    await sleep(1500);
 
     // Click all "Show more" buttons to expand details
     await clickAllShowMore(page);
@@ -69,7 +72,7 @@ async function clickAllShowMore(page: Page): Promise<void> {
       const showMore = page.locator('button:has-text("Show more")').first();
       if (await showMore.isVisible({ timeout: 1000 })) {
         await showMore.click();
-        await sleep(300);
+        await sleep(1000);
       } else {
         break;
       }
