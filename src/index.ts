@@ -7,7 +7,7 @@ import { scrapeAttendeeList } from './scrape-list';
 import { scrapeAttendeeDetail } from './scrape-detail';
 import { loadProgress, saveProgress, createInitialProgress, markCompleted, markFailed, setAttendeeList } from './progress';
 import { initCsv, appendRecord } from './csv-writer';
-import { log, logError, randomDelay, sleep } from './utils';
+import { log, logError, randomDelay } from './utils';
 
 async function main() {
   log('=== Manifest Vegas 2026 Attendee Scraper ===');
@@ -35,50 +35,54 @@ async function main() {
       log(`Resuming with ${progress.attendeeList.length} attendees already collected.`);
     }
 
-    // Step 3: Scrape each attendee detail
+    // Step 3: Scrape each attendee detail (parallel worker pool)
     log('--- Phase 3: Scraping attendee details ---');
     const total = progress.attendeeList.length;
     let scraped = progress.completed.length;
 
-    for (let i = 0; i < total; i++) {
-      const attendee = progress.attendeeList[i];
-
-      // Skip already completed
-      if (progress.completed.includes(attendee.id)) {
-        continue;
-      }
-
-      // Skip if failed too many times
+    // Build list of pending attendees (skip already completed / max-failed)
+    const pending = progress.attendeeList.filter(attendee => {
+      if (progress.completed.includes(attendee.id)) return false;
       const failedEntry = progress.failed.find(f => f.id === attendee.id);
       if (failedEntry && failedEntry.attempts >= CONFIG.MAX_RETRIES) {
         logError(`Skipping ${attendee.name} - failed ${failedEntry.attempts} times: ${failedEntry.error}`);
-        continue;
+        return false;
       }
+      return true;
+    });
 
-      try {
-        const record = await scrapeAttendeeDetail(page, context, attendee);
-        appendRecord(record);
-        markCompleted(progress, attendee.id);
-        scraped++;
-        log(`[${scraped}/${total}] Scraped: ${record.name} (${record.role || 'N/A'})`);
-      } catch (error) {
-        const errMsg = error instanceof Error ? error.message : String(error);
-        logError(`Failed to scrape ${attendee.name}: ${errMsg}`);
-        markFailed(progress, attendee.id, errMsg);
-      }
+    log(`Workers: ${CONFIG.CONCURRENCY} | Pending: ${pending.length}`);
 
-      // Politeness delays
-      await randomDelay(CONFIG.TIMING.DETAIL_DELAY_MIN, CONFIG.TIMING.DETAIL_DELAY_MAX);
+    // Shared queue index — each worker atomically claims the next item
+    let queueIndex = 0;
 
-      // Batch pauses
-      if (scraped > 0 && scraped % CONFIG.TIMING.LARGE_BATCH_PAUSE_INTERVAL === 0) {
-        log(`Large batch pause (${CONFIG.TIMING.LARGE_BATCH_PAUSE_DURATION / 1000}s)...`);
-        await sleep(CONFIG.TIMING.LARGE_BATCH_PAUSE_DURATION);
-      } else if (scraped > 0 && scraped % CONFIG.TIMING.BATCH_PAUSE_INTERVAL === 0) {
-        log(`Batch pause (${CONFIG.TIMING.BATCH_PAUSE_DURATION / 1000}s)...`);
-        await sleep(CONFIG.TIMING.BATCH_PAUSE_DURATION);
+    // Spin up N pages from the same authenticated context
+    const workerPages = await Promise.all(
+      Array.from({ length: CONFIG.CONCURRENCY }, () => context.newPage())
+    );
+
+    async function worker(workerPage: typeof page): Promise<void> {
+      while (true) {
+        const i = queueIndex++;
+        if (i >= pending.length) break;
+        const attendee = pending[i];
+        try {
+          const record = await scrapeAttendeeDetail(workerPage, context, attendee);
+          appendRecord(record);
+          markCompleted(progress, attendee.id);
+          scraped++;
+          log(`[${scraped}/${total}] Scraped: ${record.name} (${record.role || 'N/A'})`);
+        } catch (error) {
+          const errMsg = error instanceof Error ? error.message : String(error);
+          logError(`Failed to scrape ${attendee.name}: ${errMsg}`);
+          markFailed(progress, attendee.id, errMsg);
+        }
+        await randomDelay(CONFIG.TIMING.DETAIL_DELAY_MIN, CONFIG.TIMING.DETAIL_DELAY_MAX);
       }
     }
+
+    await Promise.all(workerPages.map(wp => worker(wp)));
+    await Promise.all(workerPages.map(wp => wp.close()));
 
     // Mark complete
     progress.phase = 'complete';

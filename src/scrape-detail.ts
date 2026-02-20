@@ -14,14 +14,14 @@ export async function scrapeAttendeeDetail(
       ? attendee.profileUrl
       : `https://matchmaking.grip.events${attendee.profileUrl}`;
 
-    await page.goto(fullUrl, { waitUntil: 'networkidle' });
-    await sleep(2000);
+    await page.goto(fullUrl, { waitUntil: 'domcontentloaded' });
+    await sleep(500);
 
     // Check if redirected to login
     if (page.url().includes('event-login')) {
       await ensureLoggedIn(page, context);
-      await page.goto(fullUrl, { waitUntil: 'networkidle' });
-      await sleep(2000);
+      await page.goto(fullUrl, { waitUntil: 'domcontentloaded' });
+      await sleep(500);
     }
 
     // Click all "Show more" buttons to expand details
@@ -69,7 +69,7 @@ async function clickAllShowMore(page: Page): Promise<void> {
       const showMore = page.locator('button:has-text("Show more")').first();
       if (await showMore.isVisible({ timeout: 1000 })) {
         await showMore.click();
-        await sleep(1000);
+        await sleep(300);
       } else {
         break;
       }
