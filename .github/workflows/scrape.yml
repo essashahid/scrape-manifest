@@ -6,7 +6,18 @@ on:
 jobs:
   scrape:
     runs-on: ubuntu-latest
-    timeout-minutes: 360  # 6 hour max
+    timeout-minutes: 360  # 6 hour max per job
+    strategy:
+      matrix:
+        include:
+          - part: 1
+            slice_start: 0
+            slice_end: 4090
+            output_csv: attendees-part1.csv
+          - part: 2
+            slice_start: 4090
+            slice_end: 0  # 0 = to the end
+            output_csv: attendees-part2.csv
 
     steps:
       - name: Checkout repo
@@ -27,40 +38,40 @@ jobs:
       - name: Create data directory
         run: mkdir -p data
 
-      - name: Run scraper
+      - name: Run scraper (part ${{ matrix.part }})
         env:
           GRIP_EMAIL: ${{ secrets.GRIP_EMAIL }}
           GRIP_PASSWORD: ${{ secrets.GRIP_PASSWORD }}
+          SLICE_START: ${{ matrix.slice_start }}
+          SLICE_END: ${{ matrix.slice_end }}
+          OUTPUT_CSV: ${{ matrix.output_csv }}
         run: npx ts-node src/index.ts
 
       - name: Upload CSV output
         uses: actions/upload-artifact@v4
-        if: always()  # Upload even if scraper crashes (to preserve partial results)
+        if: always()
         with:
-          name: attendees-csv
-          path: data/attendees.csv
+          name: ${{ matrix.output_csv }}
+          path: data/${{ matrix.output_csv }}
           retention-days: 30
 
       - name: Upload progress checkpoint
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: scraper-progress
+          name: progress-part${{ matrix.part }}
           path: data/progress.json
           retention-days: 30
 
       - name: Print summary
         if: always()
         run: |
-          if [ -f data/attendees.csv ]; then
-            LINES=$(wc -l < data/attendees.csv)
-            echo "### Scraping Results" >> $GITHUB_STEP_SUMMARY
+          if [ -f "data/${{ matrix.output_csv }}" ]; then
+            LINES=$(wc -l < "data/${{ matrix.output_csv }}")
+            echo "### Scraping Results (Part ${{ matrix.part }})" >> $GITHUB_STEP_SUMMARY
+            echo "- Slice: ${{ matrix.slice_start }} to ${{ matrix.slice_end || 'end' }}" >> $GITHUB_STEP_SUMMARY
             echo "- CSV rows (including header): $LINES" >> $GITHUB_STEP_SUMMARY
             echo "- Attendees scraped: $((LINES - 1))" >> $GITHUB_STEP_SUMMARY
-            echo "- File: \`data/attendees.csv\`" >> $GITHUB_STEP_SUMMARY
           else
-            echo "No CSV file found." >> $GITHUB_STEP_SUMMARY
-          fi
-          if [ -f data/progress.json ]; then
-            echo "- Progress file exists (can resume)" >> $GITHUB_STEP_SUMMARY
+            echo "No CSV file found for part ${{ matrix.part }}." >> $GITHUB_STEP_SUMMARY
           fi

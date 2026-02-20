@@ -37,12 +37,25 @@ async function main() {
 
     // Step 3: Scrape each attendee detail (parallel worker pool)
     log('--- Phase 3: Scraping attendee details ---');
-    const total = progress.attendeeList.length;
-    let scraped = progress.completed.length;
+
+    // Apply slice if configured (for splitting work across multiple runs)
+    const sliceStart = CONFIG.SLICE_START;
+    const sliceEnd = CONFIG.SLICE_END > 0 ? CONFIG.SLICE_END : progress.attendeeList.length;
+    const slicedList = progress.attendeeList.slice(sliceStart, sliceEnd);
+
+    if (sliceStart > 0 || CONFIG.SLICE_END > 0) {
+      log(`Slice: processing attendees ${sliceStart} to ${sliceEnd} (${slicedList.length} of ${progress.attendeeList.length})`);
+    }
+
+    const total = slicedList.length;
+    let scraped = 0;
 
     // Build list of pending attendees (skip already completed / max-failed)
-    const pending = progress.attendeeList.filter(attendee => {
-      if (progress.completed.includes(attendee.id)) return false;
+    const pending = slicedList.filter(attendee => {
+      if (progress.completed.includes(attendee.id)) {
+        scraped++;
+        return false;
+      }
       const failedEntry = progress.failed.find(f => f.id === attendee.id);
       if (failedEntry && failedEntry.attempts >= CONFIG.MAX_RETRIES) {
         logError(`Skipping ${attendee.name} - failed ${failedEntry.attempts} times: ${failedEntry.error}`);

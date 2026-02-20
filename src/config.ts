@@ -34,11 +34,15 @@ export const CONFIG = {
   PATHS: {
     AUTH_STATE: path.join(process.cwd(), 'data', 'auth-state.json'),
     PROGRESS: path.join(process.cwd(), 'data', 'progress.json'),
-    OUTPUT_CSV: path.join(process.cwd(), 'data', 'attendees.csv'),
+    OUTPUT_CSV: path.join(process.cwd(), 'data', process.env.OUTPUT_CSV || 'attendees.csv'),
     ERRORS: path.join(process.cwd(), 'data', 'errors.json'),
     DATA_DIR: path.join(process.cwd(), 'data'),
   },
 
   MAX_RETRIES: 3,
   HEADED: process.env.HEADED === 'true',
+
+  // Slicing: scrape only a portion of the attendee list (0-based indices)
+  SLICE_START: parseInt(process.env.SLICE_START || '0'),
+  SLICE_END: parseInt(process.env.SLICE_END || '0'), // 0 means "to the end"
 };
